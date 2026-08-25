@@ -1,5 +1,8 @@
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import base64
+import json
+from pathlib import Path
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from techverify.protocol import canonical_receipt, signing_payload, verify_signature
 
@@ -28,3 +31,17 @@ def test_round_trip_and_tamper_detection():
     receipt = canonical_receipt(did, room, nonce, text, signature)
     assert receipt["text"] == "hello world"
     assert receipt["type"] == "technocore-receipt"
+
+
+def test_live_technocore_vector_verifies():
+    vector = json.loads((Path(__file__).parents[1] / "vectors" / "live.json").read_text())
+
+    assert vector["source"] == "technocore.chat"
+    assert vector["kind"] == "live-signed-message"
+    assert verify_signature(
+        vector["did"],
+        vector["signature"],
+        vector["room"],
+        int(vector["nonce"]),
+        vector["text"],
+    )
