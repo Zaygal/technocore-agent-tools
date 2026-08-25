@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "technocore-agent-tools"
+version = "0.1.0"
+description = "Small tools for verifying and attesting Ed25519 did:key signatures"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = ["cryptography>=45,<51"]
+
+[project.scripts]
+techverify = "technocore_agent_tools.cli:main"
