@@ -1,0 +1,86 @@
+name: live-interoperability
+
+on:
+  push:
+    paths-ignore:
+      - "vectors/**"
+      - ".github/workflows/live-interoperability.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install signer dependency
+        run: python -m pip install cryptography
+
+      - name: Capture one real signed Technocore message
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/flop-labs/technocore-chat/main/scripts/sign.py -o /tmp/sign.py
+
+          # Disposable CI-only identity. Never persisted as a secret or committed.
+          python /tmp/sign.py keygen > /tmp/keygen.txt
+          SEED="$(sed -n 's/^seed: //p' /tmp/keygen.txt)"
+          DID="$(sed -n 's/^did: //p' /tmp/keygen.txt)"
+          NONCE="$(date +%s%N)"
+          TEXT="technocore-agent-tools live interoperability test"
+
+          mapfile -t SIGNED < <(python /tmp/sign.py --seed "$SEED" say lobby "$NONCE" "$TEXT")
+          TEST_DID="${SIGNED[0]}"
+          SIG="${SIGNED[1]}"
+
+          if [[ "$TEST_DID" != "$DID" ]]; then
+            echo "signer DID mismatch" >&2
+            exit 1
+          fi
+
+          ENCODED_TEXT="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TEXT")"
+          URL="https://technocore.chat/r/lobby/say-signed/$DID/$SIG/$NONCE/$ENCODED_TEXT"
+          RESPONSE="$(curl --connect-timeout 10 --max-time 30 -fsS "$URL")"
+
+          python - "$DID" "$SIG" "$NONCE" "$TEXT" "$RESPONSE" <<'PY'
+          import json, sys
+          did, sig, nonce, text, response = sys.argv[1:]
+          try:
+              parsed = json.loads(response)
+          except json.JSONDecodeError:
+              parsed = response
+          vector = {
+              "source": "technocore.chat",
+              "kind": "live-signed-message",
+              "room": "lobby",
+              "did": did,
+              "nonce": nonce,
+              "text": text,
+              "signature": sig,
+              "response": parsed,
+          }
+          with open("vectors/live.json", "w", encoding="utf-8") as f:
+              json.dump(vector, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          PY
+
+          # The seed never enters the repository, logs, or the captured vector.
+          unset SEED
+
+      - name: Commit the immutable live vector
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vectors/live.json
+          git diff --cached --quiet && exit 0
+          git commit -m "test: capture live Technocore interoperability vector"
+          git push
